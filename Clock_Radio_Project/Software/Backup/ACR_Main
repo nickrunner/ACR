@@ -1,0 +1,119 @@
+//@Version: Pre-Lab 5
+//Author: Nick Schrock
+//EGR 326 LCD Display Interface
+
+#include <stdio.h>
+#include "uart.h"
+#include <string.h>
+#include <avr/io.h>
+#include "LCD_Driver.h"
+#include "SPI_Driver.h"
+#include "TWI_Driver.h"
+#include "RTC_Driver.h"
+#include "Alarm_Driver.h"
+#include "avr/interrupt.h"
+
+#include <stdbool.h>
+
+#define F_CPU 16000000UL
+#include <util/delay.h>
+#define BAUD 9600
+#define MYUBRR F_CPU/16/BAUD-1
+
+static uint16_t b1_state = 0;
+static uint16_t b2_state = 0;
+static int b1_flag;
+static int b2_flag;
+static int b1_count;
+static int b2_count;
+
+void timer0_init(void){
+	cli();
+	TCCR0A |= _BV(WGM01);		//Set to CTC mode
+	TIFR0 |= _BV(OCF0A);		//flag to set on compare match
+	TCCR0B |= _BV(CS02) | _BV(CS00);		//Prescalar1024
+	OCR0A = 78;
+	TIMSK0 |= _BV(OCIE0A);
+	sei();	
+}
+
+void timer1_init(void){
+	//TCCR1A= 0;
+	//TCCR1B=0;
+	TCCR1A |= _BV(COM1A1) | _BV(WGM11);
+	TCCR1B |= _BV(CS12) | _BV(WGM13);
+	ICR1 = 3125;
+	OCR1A = 0;
+	//TCNT1=0;
+}
+
+void setup(void){
+	cli();
+	DDRB |= _BV(1);
+	DDRD &= ~_BV(6);
+	DDRD &= ~_BV(5);
+	PORTD |= _BV(6) | _BV(5);
+	
+	timer0_init();
+	timer1_init();
+	SPI_Master_Init();
+	I2C_Init();
+	LCD_Init();
+	
+	set_Time(0x02, 0x00, 0x00);
+	sei();
+}
+
+ISR(TIMER0_COMPA_vect)
+{
+	b1_state = (b1_state<<1) | (PIND & (1<<PD6)) >> 6 | 0xfc00;
+	b2_state = (b2_state<<1) | (PIND & (1<<PD5)) >> 6 | 0xfc00;
+	
+	if(PB1_State==0xfc00){
+		silence_Alarm();
+		b1_flag = true;
+		b1_count++;
+	}
+	
+	if(PB2_State==0xfc00){
+		b2_flag = true;
+		b2_count++;
+	}
+	
+	TIFR0 |= _BV(OCF0A);
+	TCNT0 = 0;
+}
+
+//Wait 1 second
+void one_sec_delay(void){
+	_delay_ms(1000);
+}
+
+int main(void){
+	
+	//Initialize UART communication with computer
+	USART_Init(MYUBRR);
+	stdout = &uart_output;
+	stdin = &uart_input;
+
+	setup();
+	
+	//const char test[] = "~TEST~ AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoP ~TEST~";
+
+	//const char names[] = "Nick Schrock Kevin Sager";
+
+	while(1){
+		
+		
+		if(check_Alarm()==1){
+			sound_Alarm(volume);
+			printf("here\n");
+		}
+		
+		one_sec_delay();
+	}
+		//RTC_DisplaySmallClock(25,2, volume);
+
+	return 0;
+
+}
